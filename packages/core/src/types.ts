@@ -378,6 +378,13 @@ export interface SessionSpawnConfig {
   agent?: string;
   /** Override the OpenCode subagent for this session (e.g. "sisyphus", "oracle") */
   subagent?: string;
+  /**
+   * ID of an existing AO session whose worktree to adopt instead of creating a
+   * new one. The new session inherits the source's worktree path, branch, and
+   * agent resume keys (claudeSessionUuid, codexThreadId, etc.) so the agent can
+   * continue the prior conversation. Mutually exclusive with claimPr.
+   */
+  attachSessionId?: string;
 }
 
 /** Config for creating an orchestrator session */
@@ -1843,6 +1850,13 @@ export interface SessionMetadata {
    * touched.
    */
   displayNameUserSet?: boolean;
+  /**
+   * Stored as the string `'true'` when this session's worktree was adopted from
+   * an existing session (via `--attach-session`) rather than created by AO.
+   * The kill path checks this flag and skips workspace.destroy() so the
+   * directory is not deleted when the session ends.
+   */
+  adoptedWorkspace?: string;
 }
 
 // =============================================================================

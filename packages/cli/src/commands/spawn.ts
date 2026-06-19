@@ -98,6 +98,7 @@ function resolveProjectAndIssue(
 interface SpawnClaimOptions {
   claimPr?: string;
   assignOnGithub?: boolean;
+  attachSession?: string;
 }
 
 /**
@@ -228,6 +229,7 @@ async function spawnSession(
         agent: agent ?? null,
         hasPrompt: !!sanitizedPrompt,
         claimPr: claimOptions?.claimPr ?? null,
+        attachSession: claimOptions?.attachSession ?? null,
       },
     });
 
@@ -236,6 +238,7 @@ async function spawnSession(
       issueId,
       agent,
       prompt: sanitizedPrompt,
+      attachSessionId: claimOptions?.attachSession,
     });
 
     let claimedPrUrl: string | null = null;
@@ -305,6 +308,10 @@ export function registerSpawn(program: Command): void {
     .option("--claim-pr <pr>", "Immediately claim an existing PR for the spawned session")
     .option("--assign-on-github", "Assign the claimed PR to the authenticated GitHub user")
     .option(
+      "--attach-session <id>",
+      "Adopt an existing session's worktree and seed its resume keys (mutually exclusive with --claim-pr)",
+    )
+    .option(
       "--prompt <text>",
       "Initial prompt/instructions for the agent (use instead of an issue)",
     )
@@ -316,6 +323,7 @@ export function registerSpawn(program: Command): void {
           agent?: string;
           claimPr?: string;
           assignOnGithub?: boolean;
+          attachSession?: string;
           prompt?: string;
         },
         command: Command,
@@ -346,9 +354,15 @@ export function registerSpawn(program: Command): void {
           process.exit(1);
         }
 
+        if (opts.attachSession && opts.claimPr) {
+          console.error(chalk.red("--attach-session and --claim-pr are mutually exclusive."));
+          process.exit(1);
+        }
+
         const claimOptions: SpawnClaimOptions = {
           claimPr: opts.claimPr,
           assignOnGithub: opts.assignOnGithub,
+          attachSession: opts.attachSession,
         };
 
         try {

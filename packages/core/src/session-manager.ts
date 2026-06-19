@@ -1357,9 +1357,32 @@ export function createSessionManager(deps: SessionManagerDeps): OpenCodeSessionM
         branch = `session/${sessionId}`;
       }
 
-      // Create workspace (if workspace plugin is available)
+      // Resolve workspace: adopt source session's worktree or create a new one.
       let workspacePath = project.path;
-      if (plugins.workspace) {
+      let adoptedWorkspace = false;
+
+      if (spawnConfig.attachSessionId) {
+        // --attach-session: borrow the source session's worktree directory.
+        // No workspace.create() — no cleanup to register.
+        const sourceLocated = findSessionRecord(spawnConfig.attachSessionId);
+        if (!sourceLocated) {
+          throw new Error(
+            `--attach-session: source session "${spawnConfig.attachSessionId}" not found`,
+          );
+        }
+        const srcWorktree = sourceLocated.raw["worktree"];
+        if (!srcWorktree) {
+          throw new Error(
+            `--attach-session: source session "${spawnConfig.attachSessionId}" has no worktree`,
+          );
+        }
+        workspacePath = srcWorktree;
+        // Inherit branch from source unless the caller overrode it explicitly.
+        if (!spawnConfig.branch) {
+          branch = sourceLocated.raw["branch"] ?? branch;
+        }
+        adoptedWorkspace = true;
+      } else if (plugins.workspace) {
         const wsInfo = await plugins.workspace.create({
           projectId: spawnConfig.projectId,
           project,
@@ -1574,6 +1597,22 @@ export function createSessionManager(deps: SessionManagerDeps): OpenCodeSessionM
         opencodeSessionId: reusedOpenCodeSessionId,
         userPrompt: spawnConfig.prompt,
         displayName,
+        // Adopted workspace: copy flag + resume keys from source session.
+        ...(adoptedWorkspace && {
+          adoptedWorkspace: "true",
+          ...(spawnConfig.attachSessionId &&
+            (() => {
+              const src = findSessionRecord(spawnConfig.attachSessionId!)?.raw ?? {};
+              return {
+                ...(src["claudeSessionUuid"] ? { claudeSessionUuid: src["claudeSessionUuid"] } : {}),
+                ...(src["codexThreadId"] ? { codexThreadId: src["codexThreadId"] } : {}),
+                ...(src["codexModel"] ? { codexModel: src["codexModel"] } : {}),
+                ...(src["opencodeSessionId"]
+                  ? { opencodeSessionId: src["opencodeSessionId"] }
+                  : {}),
+              };
+            })()),
+        }),
       });
 
       if (plugins.agent.postLaunchSetup) {
@@ -2569,7 +2608,7 @@ export function createSessionManager(deps: SessionManagerDeps): OpenCodeSessionM
     }
 
     const worktree = raw["worktree"];
-    if (worktree && shouldDestroyWorkspacePath(project, projectId, worktree)) {
+    if (worktree && raw["adoptedWorkspace"] !== "true" && shouldDestroyWorkspacePath(project, projectId, worktree)) {
       const workspacePlugin = project
         ? resolvePlugins(project).workspace
         : registry.get<Workspace>("workspace", config.defaults.workspace);
