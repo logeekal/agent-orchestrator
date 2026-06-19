@@ -103,6 +103,7 @@ export function AddProjectModal({ open, onClose }: AddProjectModalProps) {
           | {
               error?: string;
               projectId?: string;
+              sessionId?: string;
               existingProjectId?: string;
               suggestedProjectId?: string;
               suggestion?: "choose-project-id";
@@ -126,7 +127,13 @@ export function AddProjectModal({ open, onClose }: AddProjectModalProps) {
         }
         const nextProjectId = body?.projectId ?? projectId.trim();
         onClose();
-        router.push(`/projects/${encodeURIComponent(nextProjectId)}`);
+        // If a worktree was adopted, go directly to the new session detail page
+        // so the user can see the adopted session and restore it immediately.
+        if (body?.sessionId) {
+          router.push(`/projects/${encodeURIComponent(nextProjectId)}/sessions/${encodeURIComponent(body.sessionId)}`);
+        } else {
+          router.push(`/projects/${encodeURIComponent(nextProjectId)}`);
+        }
         router.refresh();
       } catch {
         setNetworkError("Network error while adding project.");

@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, realpathSync, readFileSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, realpathSync, readFileSync, statSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { homedir } from "node:os";
@@ -8,7 +8,8 @@ import { atomicWriteFileSync } from "./atomic-write.js";
 import { detectScmPlatform } from "./config-generator.js";
 import { withFileLockSync } from "./file-lock.js";
 import { ProjectResolveError, type ProjectResolveErrorKind } from "./types.js";
-import { generateSessionPrefix } from "./paths.js";
+import { generateSessionPrefix, getProjectSessionsDir } from "./paths.js";
+import { listMetadata, writeMetadata, reserveSessionId } from "./metadata.js";
 import { normalizeOriginUrl } from "./storage-key.js";
 import { getDefaultRuntime } from "./platform.js";
 import { recordActivityEvent } from "./activity-events.js";
@@ -848,6 +849,191 @@ export function registerProjectInGlobalConfig(
     saveGlobalConfig(globalConfig, configPath);
     return effectiveProjectId;
   });
+}
+
+// =============================================================================
+// WORKTREE DETECTION + ADOPTION
+// =============================================================================
+
+/**
+ * Derive the Cursor project key for a workspace path.
+ * Cursor slugifies paths by replacing every sequence of `/` and `_` chars with `-`
+ * and stripping the leading separator, e.g.:
+ *   /Users/jatin/projects/kibana__feat_x  →  Users-jatin-projects-kibana-feat-x
+ */
+function cursorProjectKey(workspacePath: string): string {
+  return workspacePath.replace(/^[/\\]/, "").replace(/[/\\_]+/g, "-");
+}
+
+/**
+ * Find the most recent Cursor agent session ID (chat UUID) for a workspace.
+ *
+ * Cursor stores agent transcripts under:
+ *   ~/.cursor/projects/<slug>/agent-transcripts/<session-uuid>/
+ *
+ * The most recently modified session directory is the one to resume.
+ * Returns the UUID string or undefined if none is found.
+ */
+export function detectCursorSessionId(workspacePath: string): string | undefined {
+  try {
+    const key = cursorProjectKey(workspacePath);
+    const transcriptDir = join(homedir(), ".cursor", "projects", key, "agent-transcripts");
+    if (!existsSync(transcriptDir)) return undefined;
+
+    let bestId: string | undefined;
+    let bestMtime = 0;
+    for (const entry of readdirSync(transcriptDir)) {
+      try {
+        const mtime = statSync(join(transcriptDir, entry)).mtimeMs;
+        if (mtime > bestMtime) {
+          bestMtime = mtime;
+          bestId = entry;
+        }
+      } catch {
+        // skip unreadable entries
+      }
+    }
+    return bestId;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Detect if a directory is a git linked worktree (not the main working tree).
+ *
+ * A linked worktree has a `.git` FILE containing `gitdir: ...`, whereas the
+ * main working tree has a `.git` DIRECTORY. When a worktree is detected we
+ * read `commondir` inside the worktree-specific git dir to derive the main
+ * repo path and read the worktree's current branch from its local HEAD.
+ *
+ * Returns `{ mainRepoPath, branch }` for a linked worktree, `null` otherwise.
+ */
+export function detectGitWorktree(
+  projectPath: string,
+): { mainRepoPath: string; branch: string } | null {
+  const dotGitPath = join(resolve(projectPath), ".git");
+  if (!existsSync(dotGitPath)) return null;
+  if (statSync(dotGitPath).isDirectory()) return null; // main working tree
+
+  const pointer = readFileSync(dotGitPath, "utf-8").trim();
+  const ptrMatch = pointer.match(/^gitdir:\s*(.+)$/i);
+  if (!ptrMatch) return null;
+
+  // worktreeGitDir: e.g. /main-repo/.git/worktrees/feat-x
+  const worktreeGitDir = resolve(projectPath, ptrMatch[1].trim());
+  const commonDirFile = join(worktreeGitDir, "commondir");
+  if (!existsSync(commonDirFile)) return null;
+
+  // commondir contains a path relative to worktreeGitDir pointing at the
+  // main repo's .git directory (often just "..").
+  const commonDir = resolve(worktreeGitDir, readFileSync(commonDirFile, "utf-8").trim());
+  // Normalize through realpathSync so symlinks (e.g. /var → /private/var on macOS)
+  // are resolved before callers compare paths.
+  let mainRepoPath: string;
+  try {
+    mainRepoPath = realpathSync(dirname(commonDir));
+  } catch {
+    mainRepoPath = dirname(commonDir);
+  } // parent of the main .git dir
+
+  // Read branch from the worktree-specific HEAD (not the common HEAD)
+  let branch = "main";
+  const headFile = join(worktreeGitDir, "HEAD");
+  if (existsSync(headFile)) {
+    const head = readFileSync(headFile, "utf-8").trim();
+    const branchMatch = head.match(/^ref: refs\/heads\/(.+)$/);
+    if (branchMatch) branch = branchMatch[1];
+  }
+
+  return { mainRepoPath, branch };
+}
+
+/**
+ * Register a project, transparently canonicalizing git worktree paths.
+ *
+ * If `worktreePath` resolves to a git linked worktree, this function:
+ *   1. Registers the PARENT (main) repo as the project in the global config
+ *   2. Allocates a new session ID and writes metadata with `adoptedWorkspace: 'true'`
+ *      so AO knows it does not own the directory and won't delete it on kill
+ *   3. Returns `{ projectId, sessionId }` — both non-null
+ *
+ * If `worktreePath` is the main working tree, it falls through to a plain
+ * `registerProjectInGlobalConfig` call and returns `{ projectId, sessionId: null }`.
+ */
+export function registerProjectWithWorktreeDetection(
+  worktreePath: string,
+  opts?: { globalConfigPath?: string },
+): { projectId: string; sessionId: string | null } {
+  const resolved = resolve(worktreePath);
+  const worktreeInfo = detectGitWorktree(resolved);
+
+  if (!worktreeInfo) {
+    const name = basename(resolved) || "project";
+    const projectId = registerProjectInGlobalConfig(
+      name,
+      name,
+      resolved,
+      undefined,
+      opts?.globalConfigPath,
+    );
+    return { projectId, sessionId: null };
+  }
+
+  const { mainRepoPath, branch } = worktreeInfo;
+  const name = basename(mainRepoPath) || "project";
+  const projectId = registerProjectInGlobalConfig(
+    name,
+    name,
+    mainRepoPath,
+    undefined,
+    opts?.globalConfigPath,
+  );
+
+  // Resolve the session prefix that registerProjectInGlobalConfig assigned
+  // (it may have added a numeric suffix to avoid collisions).
+  const globalConfig = loadGlobalConfig(opts?.globalConfigPath);
+  const entry = globalConfig?.projects[projectId];
+  const prefix = entry?.sessionPrefix ?? generateSessionPrefix(name);
+
+  // Allocate the next available session ID under the project's prefix.
+  const sessionsDir = getProjectSessionsDir(projectId);
+  mkdirSync(sessionsDir, { recursive: true });
+  const existing = listMetadata(sessionsDir);
+  const prefixRe = new RegExp(`^${prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}-(\\d+)$`);
+  let nextNum = 1;
+  for (const id of existing) {
+    const m = id.match(prefixRe);
+    if (m) nextNum = Math.max(nextNum, parseInt(m[1], 10) + 1);
+  }
+
+  let sessionId = `${prefix}-${nextNum}`;
+  // Use exclusive-create for atomicity — retry on race
+  for (let attempt = 0; attempt < 1000; attempt++) {
+    if (reserveSessionId(sessionsDir, sessionId)) break;
+    nextNum += 1;
+    sessionId = `${prefix}-${nextNum}`;
+  }
+
+  // Detect an existing Cursor session in this worktree so restore can resume it.
+  const cursorSessionId = detectCursorSessionId(resolved);
+
+  writeMetadata(sessionsDir, sessionId, {
+    worktree: resolved,
+    branch,
+    // "terminated" synthesizes to lifecycle.session.state = "terminated", which
+    // isTerminalSession() recognises as a dead session. This lets the dashboard
+    // restore button work (isRestorable() requires the session to be terminal).
+    // "spawning" would synthesize to "not_started" which is non-terminal and
+    // causes "Session X cannot be restored: session is not in a terminal state".
+    status: "terminated",
+    project: projectId,
+    adoptedWorkspace: "true",
+    createdAt: new Date().toISOString(),
+    ...(cursorSessionId ? { cursorSessionId } : {}),
+  });
+
+  return { projectId, sessionId };
 }
 
 // =============================================================================

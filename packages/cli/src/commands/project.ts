@@ -8,6 +8,8 @@ import {
   isPortfolioEnabled,
   recordActivityEvent,
   registerProject,
+  registerProjectWithWorktreeDetection,
+  detectGitWorktree,
   unregisterProject,
   loadPreferences,
   savePreferences,
@@ -86,6 +88,35 @@ export function registerProjectCommand(program: Command): void {
     .action(async (path: string, opts: { key?: string; default?: boolean }) => {
       assertPortfolioEnabled();
       const resolvedPath = resolve(path);
+
+      // If the path is a git linked worktree, canonicalize to the parent repo
+      // and create an adopted session rather than registering the worktree itself.
+      const worktreeInfo = detectGitWorktree(resolvedPath);
+      if (worktreeInfo) {
+        try {
+          const { projectId, sessionId } = registerProjectWithWorktreeDetection(resolvedPath);
+          console.log(
+            chalk.green(
+              `Detected git worktree — registered parent repo "${projectId}" and created adopted session ${sessionId}`,
+            ),
+          );
+          recordActivityEvent({
+            source: "cli",
+            kind: "cli.project_register_worktree_adopted",
+            summary: `worktree adopted: ${resolvedPath} → project "${projectId}", session ${sessionId}`,
+            data: { worktreePath: resolvedPath, projectId, sessionId },
+          });
+        } catch (err) {
+          console.error(
+            chalk.red(
+              `Failed to adopt worktree: ${err instanceof Error ? err.message : String(err)}`,
+            ),
+          );
+          process.exit(1);
+        }
+        return;
+      }
+
       const candidatePaths = [
         resolve(resolvedPath, "agent-orchestrator.yaml"),
         resolve(resolvedPath, "agent-orchestrator.yml"),

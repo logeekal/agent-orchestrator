@@ -315,6 +315,11 @@ export function writeMetadata(
   if (metadata.role) data["role"] = metadata.role;
   if (metadata.dashboard) data["dashboard"] = metadata.dashboard;
   if (metadata.opencodeSessionId) data["opencodeSessionId"] = metadata.opencodeSessionId;
+  if (metadata.claudeSessionUuid) data["claudeSessionUuid"] = metadata.claudeSessionUuid;
+  if (metadata.codexThreadId) data["codexThreadId"] = metadata.codexThreadId;
+  if (metadata.codexModel) data["codexModel"] = metadata.codexModel;
+  if (metadata.cursorSessionId) data["cursorSessionId"] = metadata.cursorSessionId;
+  if (metadata.adoptedWorkspace) data["adoptedWorkspace"] = metadata.adoptedWorkspace;
   if (metadata.pinnedSummary) data["pinnedSummary"] = metadata.pinnedSummary;
   if (metadata.userPrompt) data["userPrompt"] = metadata.userPrompt;
   if (metadata.displayName) data["displayName"] = metadata.displayName;

@@ -370,9 +370,13 @@ function createCursorAgent(): Agent {
       };
     },
 
-    // Cursor doesn't support session resume — return null so caller falls back to getLaunchCommand
-    async getRestoreCommand(_session: Session, _project: ProjectConfig): Promise<string | null> {
-      return null;
+    async getRestoreCommand(session: Session, _project: ProjectConfig): Promise<string | null> {
+      const chatId = session.metadata["cursorSessionId"];
+      if (!chatId) return null;
+      // `agent --resume <chatId>` continues the most recent Cursor conversation
+      // for the given session UUID, picked up at worktree-adoption time.
+      const base = isWindows() ? "agent.cmd" : "agent";
+      return `${base} --resume ${shellEscape(chatId)}`;
     },
 
     async setupWorkspaceHooks(_workspacePath: string, _config: WorkspaceHooksConfig): Promise<void> {

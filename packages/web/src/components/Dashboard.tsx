@@ -295,7 +295,19 @@ function DashboardInner({
       done: [],
     };
     for (const session of displaySessions) {
-      zones[getAttentionLevel(session, attentionZones)].push(session);
+      let level = getAttentionLevel(session, attentionZones);
+      // Adopted worktree sessions (adoptedWorkspace=true) that have no PR and no
+      // active runtime should surface in "respond" so users can restore them —
+      // not buried in the collapsed "done" zone.
+      if (
+        level === "done" &&
+        session.metadata["adoptedWorkspace"] === "true" &&
+        !session.pr &&
+        session.lifecycle?.runtimeState !== "alive"
+      ) {
+        level = "respond";
+      }
+      zones[level].push(session);
     }
     return zones;
   }, [displaySessions, attentionZones]);

@@ -338,14 +338,16 @@ function ProjectSidebarInner({
     edge: "right",
   });
 
+  // Always start with the server-safe default so SSR and client agree on the
+  // initial render. Storage is applied in a useEffect after mount to avoid the
+  // "server HTML doesn't match client" hydration error that occurs when
+  // typeof window guards produce different values on server vs client.
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(
-    () =>
-      loadExpandedProjects() ??
-      new Set(activeProjectId && activeProjectId !== "all" ? [activeProjectId] : []),
+    () => new Set(activeProjectId && activeProjectId !== "all" ? [activeProjectId] : []),
   );
-  const [showKilled, setShowKilled] = useState<boolean>(loadShowKilled);
-  const [showDone, setShowDone] = useState<boolean>(loadShowDone);
-  const [showSessionId, setShowSessionId] = useState<boolean>(loadShowSessionId);
+  const [showKilled, setShowKilled] = useState<boolean>(false);
+  const [showDone, setShowDone] = useState<boolean>(false);
+  const [showSessionId, setShowSessionId] = useState<boolean>(false);
   // Inline session-rename state. Only one row is edited at a time. `pendingRenames`
   // mirrors the in-flight / just-saved value so the new label appears immediately
   // without waiting for the next SSE refresh.
@@ -364,6 +366,17 @@ function ProjectSidebarInner({
   const projectMenuPopoverRef = useRef<HTMLDivElement>(null);
   usePopoverClamp(settingsOpen, settingsPopoverRef);
   usePopoverClamp(Boolean(projectMenuOpenId), projectMenuPopoverRef);
+
+  // Hydrate sidebar preferences from storage after mount (client-only).
+  // Must run after mount so SSR and client agree on the initial render.
+  useEffect(() => {
+    const stored = loadExpandedProjects();
+    if (stored) setExpandedProjects(stored);
+    setShowKilled(loadShowKilled());
+    setShowDone(loadShowDone());
+    setShowSessionId(loadShowSessionId());
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Persist the session-id preference across reloads.
   useEffect(() => {
