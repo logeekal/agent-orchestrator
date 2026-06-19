@@ -484,6 +484,13 @@ export function getAttentionLevel(
 function getDetailedAttentionLevel(session: DashboardSession): AttentionLevel {
   // ── Done: terminal states ─────────────────────────────────────────
   if (isDashboardSessionDone(session)) {
+    // Adopted worktree sessions (adoptedWorkspace=true) that haven't had an
+    // agent run yet land here as "terminated" — but they need the user to
+    // restore them. Surface them in "respond" so they're visible rather than
+    // buried in the collapsed "done" zone.
+    if (session.metadata["adoptedWorkspace"] === "true" && !session.pr) {
+      return "respond";
+    }
     return "done";
   }
 
