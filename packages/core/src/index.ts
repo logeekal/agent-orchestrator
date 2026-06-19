@@ -414,6 +414,7 @@ export {
   repairWrappedLocalProjectConfig,
   registerProjectInGlobalConfig,
   detectGitWorktree,
+  detectCursorSessionId,
   registerProjectWithWorktreeDetection,
   generateExternalId,
   buildEffectiveProjectConfig,

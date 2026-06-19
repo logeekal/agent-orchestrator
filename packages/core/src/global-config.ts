@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, realpathSync, readFileSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, realpathSync, readFileSync, statSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { homedir } from "node:os";
@@ -856,6 +856,50 @@ export function registerProjectInGlobalConfig(
 // =============================================================================
 
 /**
+ * Derive the Cursor project key for a workspace path.
+ * Cursor slugifies paths by replacing every sequence of `/` and `_` chars with `-`
+ * and stripping the leading separator, e.g.:
+ *   /Users/jatin/projects/kibana__feat_x  →  Users-jatin-projects-kibana-feat-x
+ */
+function cursorProjectKey(workspacePath: string): string {
+  return workspacePath.replace(/^[/\\]/, "").replace(/[/\\_]+/g, "-");
+}
+
+/**
+ * Find the most recent Cursor agent session ID (chat UUID) for a workspace.
+ *
+ * Cursor stores agent transcripts under:
+ *   ~/.cursor/projects/<slug>/agent-transcripts/<session-uuid>/
+ *
+ * The most recently modified session directory is the one to resume.
+ * Returns the UUID string or undefined if none is found.
+ */
+export function detectCursorSessionId(workspacePath: string): string | undefined {
+  try {
+    const key = cursorProjectKey(workspacePath);
+    const transcriptDir = join(homedir(), ".cursor", "projects", key, "agent-transcripts");
+    if (!existsSync(transcriptDir)) return undefined;
+
+    let bestId: string | undefined;
+    let bestMtime = 0;
+    for (const entry of readdirSync(transcriptDir)) {
+      try {
+        const mtime = statSync(join(transcriptDir, entry)).mtimeMs;
+        if (mtime > bestMtime) {
+          bestMtime = mtime;
+          bestId = entry;
+        }
+      } catch {
+        // skip unreadable entries
+      }
+    }
+    return bestId;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Detect if a directory is a git linked worktree (not the main working tree).
  *
  * A linked worktree has a `.git` FILE containing `gitdir: ...`, whereas the
@@ -971,6 +1015,9 @@ export function registerProjectWithWorktreeDetection(
     sessionId = `${prefix}-${nextNum}`;
   }
 
+  // Detect an existing Cursor session in this worktree so restore can resume it.
+  const cursorSessionId = detectCursorSessionId(resolved);
+
   writeMetadata(sessionsDir, sessionId, {
     worktree: resolved,
     branch,
@@ -983,6 +1030,7 @@ export function registerProjectWithWorktreeDetection(
     project: projectId,
     adoptedWorkspace: "true",
     createdAt: new Date().toISOString(),
+    ...(cursorSessionId ? { cursorSessionId } : {}),
   });
 
   return { projectId, sessionId };

@@ -318,6 +318,7 @@ export function writeMetadata(
   if (metadata.claudeSessionUuid) data["claudeSessionUuid"] = metadata.claudeSessionUuid;
   if (metadata.codexThreadId) data["codexThreadId"] = metadata.codexThreadId;
   if (metadata.codexModel) data["codexModel"] = metadata.codexModel;
+  if (metadata.cursorSessionId) data["cursorSessionId"] = metadata.cursorSessionId;
   if (metadata.adoptedWorkspace) data["adoptedWorkspace"] = metadata.adoptedWorkspace;
   if (metadata.pinnedSummary) data["pinnedSummary"] = metadata.pinnedSummary;
   if (metadata.userPrompt) data["userPrompt"] = metadata.userPrompt;

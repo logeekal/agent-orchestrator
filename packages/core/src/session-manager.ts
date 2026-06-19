@@ -1610,6 +1610,7 @@ export function createSessionManager(deps: SessionManagerDeps): OpenCodeSessionM
                 ...(src["opencodeSessionId"]
                   ? { opencodeSessionId: src["opencodeSessionId"] }
                   : {}),
+                ...(src["cursorSessionId"] ? { cursorSessionId: src["cursorSessionId"] } : {}),
               };
             })()),
         }),
