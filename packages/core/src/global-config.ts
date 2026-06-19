@@ -884,7 +884,14 @@ export function detectGitWorktree(
   // commondir contains a path relative to worktreeGitDir pointing at the
   // main repo's .git directory (often just "..").
   const commonDir = resolve(worktreeGitDir, readFileSync(commonDirFile, "utf-8").trim());
-  const mainRepoPath = dirname(commonDir); // parent of the main .git dir
+  // Normalize through realpathSync so symlinks (e.g. /var → /private/var on macOS)
+  // are resolved before callers compare paths.
+  let mainRepoPath: string;
+  try {
+    mainRepoPath = realpathSync(dirname(commonDir));
+  } catch {
+    mainRepoPath = dirname(commonDir);
+  } // parent of the main .git dir
 
   // Read branch from the worktree-specific HEAD (not the common HEAD)
   let branch = "main";
