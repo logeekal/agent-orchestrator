@@ -4,12 +4,14 @@ import { basename, join, resolve } from "node:path";
 import { NextResponse, type NextRequest } from "next/server";
 import {
   detectDefaultBranchFromDir,
+  detectGitWorktree,
   generateExternalId,
   getGlobalConfigPath,
   loadConfig,
   migrateToGlobalConfig,
   recordActivityEvent,
   registerProjectInGlobalConfig,
+  registerProjectWithWorktreeDetection,
 } from "@aoagents/ao-core";
 import { revalidatePath } from "next/cache";
 import { getAllProjects } from "@/lib/project-name";
@@ -101,6 +103,28 @@ export async function POST(request: NextRequest) {
 
   try {
     seedGlobalRegistryFromCurrentConfig();
+
+    // If the path is a git linked worktree, canonicalize to the parent repo
+    // and create an adopted session rather than registering the worktree.
+    const worktreeInfo = detectGitWorktree(resolvedPath);
+    if (worktreeInfo) {
+      const { projectId: registeredProjectId, sessionId } =
+        registerProjectWithWorktreeDetection(resolvedPath);
+      invalidatePortfolioServicesCache();
+      revalidatePortfolioPaths(registeredProjectId);
+      recordActivityEvent({
+        projectId: registeredProjectId,
+        source: "api",
+        kind: "api.project_added",
+        summary: `worktree adopted: ${registeredProjectId} (session ${sessionId})`,
+        data: { worktreePath: resolvedPath, sessionId },
+      });
+      return NextResponse.json(
+        { ok: true, projectId: registeredProjectId, sessionId },
+        { status: 201 },
+      );
+    }
+
     const registeredProjectId = registerProjectInGlobalConfig(
       projectId,
       name ?? projectId,

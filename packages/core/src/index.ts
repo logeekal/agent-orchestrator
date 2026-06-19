@@ -413,6 +413,8 @@ export {
   getLocalProjectConfigPath,
   repairWrappedLocalProjectConfig,
   registerProjectInGlobalConfig,
+  detectGitWorktree,
+  registerProjectWithWorktreeDetection,
   generateExternalId,
   buildEffectiveProjectConfig,
   resolveProjectIdentity,
