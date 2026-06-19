@@ -974,7 +974,12 @@ export function registerProjectWithWorktreeDetection(
   writeMetadata(sessionsDir, sessionId, {
     worktree: resolved,
     branch,
-    status: "spawning",
+    // "terminated" synthesizes to lifecycle.session.state = "terminated", which
+    // isTerminalSession() recognises as a dead session. This lets the dashboard
+    // restore button work (isRestorable() requires the session to be terminal).
+    // "spawning" would synthesize to "not_started" which is non-terminal and
+    // causes "Session X cannot be restored: session is not in a terminal state".
+    status: "terminated",
     project: projectId,
     adoptedWorkspace: "true",
     createdAt: new Date().toISOString(),

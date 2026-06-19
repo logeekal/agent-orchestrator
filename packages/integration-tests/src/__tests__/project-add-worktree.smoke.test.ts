@@ -116,6 +116,8 @@ describe("worktree canonicalization (registerProjectWithWorktreeDetection)", () 
     expect(raw!["worktree"]).toBe(worktreeDir);
     expect(raw!["branch"]).toBe("feat/x");
     expect(raw!["adoptedWorkspace"]).toBe("true");
+    // "terminated" so the dashboard restore button can work (isRestorable requires terminal state)
+    expect(raw!["status"]).toBe("terminated");
   });
 
   // ─── Web API path ──────────────────────────────────────────────────────────
